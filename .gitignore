@@ -243,3 +243,10 @@ Thumbs.db #thumbnail cache on Windows
 
 # Azurite stuff
 __azurite_*.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
