@@ -17,54 +17,66 @@ jobs:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Importante para que SonarCloud analice el historial
+          fetch-depth: 0
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        # CAMBIO: Usamos la versión v4 oficial para quitar el warning
+        uses: SonarSource/sonarqube-scan-action@v4
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Lo genera GitHub solo
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          # AQUI PEGA TUS CLAVES:
           args: >
             -Dsonar.organization=barea1
             -Dsonar.projectKey=barea1_msdocs-fastapi-postgresql-sample-app
             -Dsonar.sources=src
             -Dsonar.python.version=3.10
+            -Dsonar.verbose=true
 
   # TRABAJO 2: DESPLIEGUE DE INFRAESTRUCTURA (TERRAFORM)
   terraform_deploy:
     name: Terraform Apply
-    needs: security_scan  # ¡SOLO SE EJECUTA SI EL ESCANER PASA!
+    needs: security_scan
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./infra  # Entra en la carpeta infra
+        working-directory: ./infra
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      # 1. Login en Azure usando el JSON que guardaste
       - name: Azure Login
-        uses: azure/login@v1
+        uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 2. Instalar Terraform
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
 
-      # 3. Inicializar (Conecta con el Storage Account remoto)
       - name: Terraform Init
+        # CAMBIO: Añadimos variables de entorno para que pueda acceder al backend
+        env:
+          ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
         run: terraform init
 
-      # 4. Validar el plan
       - name: Terraform Plan
+        env:
+          ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
         run: terraform plan -var="db_password=${{ secrets.DB_PASSWORD }}"
 
-      # 5. Aplicar cambios (Solo en rama main)
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
+        env:
+          ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
         run: terraform apply -auto-approve -var="db_password=${{ secrets.DB_PASSWORD }}"
