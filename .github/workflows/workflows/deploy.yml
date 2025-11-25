@@ -1,0 +1,70 @@
+name: CI/CD - Security & Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # TRABAJO 1: ANÁLISIS DE SEGURIDAD (SONARCLOUD)
+  security_scan:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Importante para que SonarCloud analice el historial
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Lo genera GitHub solo
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # AQUI PEGA TUS CLAVES:
+          args: >
+            -Dsonar.organization=barea1
+            -Dsonar.projectKey=barea1_msdocs-fastapi-postgresql-sample-app
+            -Dsonar.sources=src
+            -Dsonar.python.version=3.10
+
+  # TRABAJO 2: DESPLIEGUE DE INFRAESTRUCTURA (TERRAFORM)
+  terraform_deploy:
+    name: Terraform Apply
+    needs: security_scan  # ¡SOLO SE EJECUTA SI EL ESCANER PASA!
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infra  # Entra en la carpeta infra
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # 1. Login en Azure usando el JSON que guardaste
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 2. Instalar Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      # 3. Inicializar (Conecta con el Storage Account remoto)
+      - name: Terraform Init
+        run: terraform init
+
+      # 4. Validar el plan
+      - name: Terraform Plan
+        run: terraform plan -var="db_password=${{ secrets.DB_PASSWORD }}"
+
+      # 5. Aplicar cambios (Solo en rama main)
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve -var="db_password=${{ secrets.DB_PASSWORD }}"
