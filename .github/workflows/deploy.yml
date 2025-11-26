@@ -19,21 +19,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Necesario para el análisis
 
       - name: SonarCloud Scan
-        # CAMBIO: Usamos la versión v4 oficial para quitar el warning
-        uses: SonarSource/sonarqube-scan-action@v4
+        uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.organization=barea1
-            -Dsonar.projectKey=barea1_msdocs-fastapi-postgresql-sample-app
-            -Dsonar.sources=src
-            -Dsonar.python.version=3.10
-            -Dsonar.verbose=true
+        # Ya no necesitamos 'with: args' porque leerá el archivo sonar-project.properties
 
   # TRABAJO 2: DESPLIEGUE DE INFRAESTRUCTURA (TERRAFORM)
   terraform_deploy:
@@ -56,7 +49,6 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
-        # CAMBIO: Añadimos variables de entorno para que pueda acceder al backend
         env:
           ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
