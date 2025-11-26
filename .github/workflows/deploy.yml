@@ -12,23 +12,20 @@ permissions:
   pull-requests: read
 
 jobs:
-  # TRABAJO 1: ANÁLISIS DE SEGURIDAD (SONARCLOUD)
+  # TRABAJO 1: SEGURIDAD
   security_scan:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # CRÍTICO: Necesario para que SonarCloud no falle
-
+          fetch-depth: 0
       - name: SonarCloud Scan
-        # Usamos la versión v4 oficial (la más moderna)
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          # Configuración explícita aquí para evitar errores de archivo no encontrado
           args: >
             -Dsonar.organization=barea1
             -Dsonar.projectKey=barea1_msdocs-fastapi-postgresql-sample-app
@@ -36,7 +33,7 @@ jobs:
             -Dsonar.python.version=3.10
             -Dsonar.verbose=true
 
-  # TRABAJO 2: DESPLIEGUE DE INFRAESTRUCTURA (TERRAFORM)
+  # TRABAJO 2: INFRAESTRUCTURA
   terraform_deploy:
     name: Terraform Apply
     needs: security_scan
@@ -44,18 +41,14 @@ jobs:
     defaults:
       run:
         working-directory: ./infra
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-
       - name: Terraform Init
         env:
           ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
@@ -63,15 +56,6 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
           ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
         run: terraform init
-
-      - name: Terraform Plan
-        env:
-          ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
-          ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-          ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
-          ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
-        run: terraform plan -var="db_password=${{ secrets.DB_PASSWORD }}"
-
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
         env:
@@ -80,3 +64,34 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
           ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
         run: terraform apply -auto-approve -var="db_password=${{ secrets.DB_PASSWORD }}"
+
+  # TRABAJO 3: CONSTRUCCIÓN Y DESPLIEGUE DE LA APP
+  build_and_deploy:
+    name: Build & Deploy App
+    needs: terraform_deploy # Espera a que la infra esté lista
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Solo en rama main
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ secrets.ACR_LOGIN_SERVER }}
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/odyssey-app:${{ github.sha }} .
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/odyssey-app:${{ github.sha }}
+
+      - name: Deploy to Container App
+        # Usamos AZ CLI para actualizar la imagen sin tocar Terraform
+        run: |
+          az containerapp update \
+            --name odyssey-app \
+            --resource-group odyssey-rg \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/odyssey-app:${{ github.sha }}
